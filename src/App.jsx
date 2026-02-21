@@ -1,29 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { db } from './firebase';
-import { collection, addDoc, onSnapshot, updateDoc, doc, deleteDoc, arrayUnion, query, orderBy } from 'firebase/firestore';
+import { collection, addDoc, onSnapshot, updateDoc, doc, deleteDoc, arrayUnion, query, orderBy, setDoc } from 'firebase/firestore';
 import confetti from 'canvas-confetti';
 
 const translations = {
-  en: { logo: 'MILKAR', join: 'Join Event', create: 'Host Event', code: 'Room Code', setup: 'Profile Setup', per: 'Per Head', note: 'Add a fun note', remind: 'Nudge Friends', theme: 'Mode', close: 'Close', remaining: 'Remaining' },
-  hi: { logo: 'मिलकर', join: 'इवेंट में जुड़ें', create: 'नया होस्ट करें', code: 'कोड डालें', setup: 'प्रोफ़ाइल', per: 'प्रति व्यक्ति', note: 'संदेश लिखें', remind: 'याद दिलाएं', theme: 'थीम', close: 'बंद करें', remaining: 'बाकी हैं' },
-  hr: { logo: 'मिलकर', join: 'पार्टी में आओ', create: 'खर्चा जोड़ो', code: 'कोड भरो', setup: 'नाम पता', per: 'एक जने के', note: 'गाली मत लिखना', remind: 'उगाही करो', theme: 'रंग', close: 'हटा दयो', remaining: 'कसर रह रही' }
+  en: { logo: 'MILKAR', join: 'Join', create: 'Host', per: 'Each', note: 'Fun note?', close: 'Settle & Archive', logout: 'Logout', history: 'Settled Parties', leaderboard: 'Speed Leaderboard' },
+  hi: { logo: 'मिलकर', join: 'जुड़ें', create: 'होस्ट', per: 'प्रति व्यक्ति', note: 'संदेश', close: 'सेटल करें', logout: 'लॉग आउट', history: 'पुराने हिसाब', leaderboard: 'सबसे तेज़' },
+  hr: { logo: 'मिलकर', join: 'आजा', create: 'जोड़', per: 'एक के', note: 'मजाक', close: 'मेट दयो', logout: 'बाहर', history: 'पुराने', leaderboard: 'सबसे पहले' }
 };
-
-const quotes = [
-  "Money can't buy happiness, but it can buy Pizza. Split it!",
-  "Friends who pay on time stay together.",
-  "Be the friend who pays, not the one who 'forgot' their wallet.",
-  "A lefty created this so you could be lazy. Respect!",
-  "Calculating... please don't be a miser today!"
-];
 
 export default function App() {
   const [user, setUser] = useState(JSON.parse(localStorage.getItem('milkar_user')) || null);
   const [tempUser, setTempUser] = useState({ name: '', upi: '' });
   const [lang, setLang] = useState('en');
   const [dark, setDark] = useState(true);
-  const [quote] = useState(quotes[Math.floor(Math.random() * quotes.length)]);
   const [events, setEvents] = useState([]);
+  const [archive, setArchive] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ title: '', totalAmount: '', memberCount: '' });
   const [inputCode, setInputCode] = useState('');
@@ -36,165 +28,159 @@ export default function App() {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setEvents(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })));
     });
-    return () => unsubscribe();
+    const qA = query(collection(db, "archive"), orderBy("archivedAt", "desc"));
+    const unsubscribeA = onSnapshot(qA, (snapshot) => {
+      setArchive(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })));
+    });
+    return () => { unsubscribe(); unsubscribeA(); };
   }, []);
 
   const handleLogin = () => {
-    if (!tempUser.name || !tempUser.upi.includes('@')) return alert("UPI ID is required!");
+    if (!tempUser.name || !tempUser.upi.includes('@')) return alert("Enter valid Name and UPI ID");
     localStorage.setItem('milkar_user', JSON.stringify(tempUser));
     setUser(tempUser);
   };
 
-  const createEvent = async () => {
-    if (!form.title || !form.totalAmount || !form.memberCount) return alert("Fill all details!");
-    const roomCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const perPerson = (parseFloat(form.totalAmount) / parseInt(form.memberCount)).toFixed(2);
-    
-    await addDoc(collection(db, "events"), { 
-      ...form, 
-      roomCode,
-      creator: user.name,
-      creatorUpi: user.upi,
-      perPerson,
-      memberCount: parseInt(form.memberCount),
-      createdAt: Date.now(), 
-      contributions: [] 
-    });
-    
-    const newRooms = [...unlockedRooms, roomCode];
-    setUnlockedRooms(newRooms);
-    localStorage.setItem('unlocked_rooms', JSON.stringify(newRooms));
-    setShowModal(false);
-    confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
+  const handleLogout = () => {
+    if(confirm("Logout?")) { localStorage.removeItem('milkar_user'); setUser(null); }
+  };
+
+  const copyToClipboard = (ev) => {
+    const text = `Join my Milkar room: ${ev.title}\nCode: ${ev.roomCode}\nPay: ₹${ev.perPerson}`;
+    navigator.clipboard.writeText(text);
+    alert("Invite copied!");
+  };
+
+  const archiveEvent = async (ev) => {
+    if(!confirm("Archive this settled room?")) return;
+    await setDoc(doc(db, "archive", ev.id), { ...ev, archivedAt: Date.now() });
+    await deleteDoc(doc(db, "events", ev.id));
+    confetti({ particleCount: 200, spread: 100, origin: { y: 0.6 } });
   };
 
   const handlePaid = async (ev) => {
-    const isAlreadyPaid = ev.contributions?.some(c => c.name === user.name);
-    if (isAlreadyPaid) return alert("You already paid, bhai!");
-
-    const note = prompt(t.note);
-    if (note !== null) {
-      await updateDoc(doc(db, "events", ev.id), { 
-        contributions: arrayUnion({ name: user.name, note: note || "Paid!", time: Date.now() }) 
-      });
-      confetti({ particleCount: 100, spread: 70, colors: ['#3b82f6', '#10b981'] });
+    if (ev.contributions?.some(c => c.name === user.name)) return alert("Already paid!");
+    const note = prompt(t.note) || "Paid!";
+    const newContributionsCount = (ev.contributions?.length || 0) + 1;
+    await updateDoc(doc(db, "events", ev.id), { 
+      contributions: arrayUnion({ name: user.name, note, time: Date.now() }) 
+    });
+    
+    if (newContributionsCount >= ev.memberCount) {
+      confetti({ particleCount: 300, spread: 120, colors: ['#3b82f6', '#ffffff', '#fbbf24'] });
+    } else {
+      confetti({ particleCount: 100 });
     }
+  };
+
+  const formatTime = (ts) => {
+    const sec = Math.floor((Date.now() - ts) / 1000);
+    if (sec < 60) return 'Just now';
+    return `${Math.floor(sec/60)}m ago`;
   };
 
   if (!user) {
     return (
-      <div className={`min-h-screen ${dark ? 'bg-slate-950 text-white' : 'bg-slate-50 text-slate-900'} flex flex-col items-center justify-center p-6 transition-colors`}>
-        <div className={`w-full max-w-md p-10 rounded-[3rem] shadow-2xl ${dark ? 'bg-slate-900 border border-white/5' : 'bg-white border border-slate-200'}`}>
-          <h1 className="text-4xl font-black text-blue-500 italic mb-2 tracking-tighter">MILKAR</h1>
-          <p className="text-[11px] font-bold opacity-50 mb-8 uppercase tracking-widest italic">"{quote}"</p>
-          <input type="text" placeholder="Name" className="w-full p-5 mb-4 rounded-2xl bg-slate-500/10 border border-white/5 outline-none focus:border-blue-500" onChange={e => setTempUser({...tempUser, name: e.target.value})} />
-          <input type="text" placeholder="UPI ID (name@upi)" className="w-full p-5 mb-6 rounded-2xl bg-slate-500/10 border border-white/5 outline-none focus:border-blue-500" onChange={e => setTempUser({...tempUser, upi: e.target.value})} />
-          <button onClick={handleLogin} className="w-full py-5 bg-blue-600 rounded-2xl font-black text-white">LET'S SPLIT</button>
+      <div className={`min-h-screen ${dark ? 'bg-black text-white' : 'bg-slate-50 text-black'} flex items-center justify-center p-6`}>
+        <div className={`w-full max-w-sm p-10 rounded-[2.5rem] ${dark ? 'bg-zinc-900' : 'bg-white shadow-xl'} text-center`}>
+          <h1 className="text-4xl font-black text-blue-500 italic mb-12 tracking-tighter uppercase">Milkar</h1>
+          <input type="text" placeholder="Name" className="w-full p-5 mb-4 rounded-2xl bg-zinc-500/10 border border-transparent outline-none focus:border-blue-500" onChange={e => setTempUser({...tempUser, name: e.target.value})} />
+          <input type="text" placeholder="UPI ID" className="w-full p-5 mb-8 rounded-2xl bg-zinc-500/10 border border-transparent outline-none focus:border-blue-500" onChange={e => setTempUser({...tempUser, upi: e.target.value})} />
+          <button onClick={handleLogin} className="w-full py-5 bg-blue-600 rounded-2xl font-black text-white uppercase tracking-widest">Enter</button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className={`min-h-screen ${dark ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} transition-all pb-12`}>
-      <nav className={`p-6 flex justify-between items-center sticky top-0 backdrop-blur-md z-50 border-b ${dark ? 'bg-slate-950/80 border-white/5' : 'bg-white/80 border-slate-200'}`}>
-        <h1 className="text-2xl font-black italic text-blue-500 tracking-tighter">MILKAR</h1>
-        <div className="flex gap-3">
-          <button onClick={() => setLang(lang === 'en' ? 'hi' : lang === 'hi' ? 'hr' : 'en')} className="text-xs font-bold px-3 py-2 bg-blue-500/10 rounded-xl">🌐 {lang.toUpperCase()}</button>
-          <button onClick={() => setDark(!dark)} className="p-2 bg-blue-500/10 rounded-xl">{dark ? '☀️' : '🌙'}</button>
+    <div className={`min-h-screen ${dark ? 'bg-black text-white' : 'bg-white text-black'} font-sans`}>
+      <nav className={`p-6 flex justify-between items-center sticky top-0 z-50 ${dark ? 'bg-black' : 'bg-white'} border-b ${dark ? 'border-white/5' : 'border-slate-100'}`}>
+        <h1 className="text-2xl font-black italic text-blue-500 tracking-tighter uppercase">Milkar</h1>
+        <div className="flex gap-4">
+          <button onClick={() => setLang(lang === 'en' ? 'hi' : lang === 'hi' ? 'hr' : 'en')} className="text-[10px] font-black px-4 py-2 bg-zinc-500/10 rounded-full">{lang.toUpperCase()}</button>
+          <button onClick={() => setDark(!dark)} className="p-2 bg-zinc-500/10 rounded-full">{dark ? '☀️' : '🌙'}</button>
         </div>
       </nav>
 
-      <main className="max-w-xl mx-auto p-6">
-        <p className="text-center text-[10px] font-bold opacity-30 uppercase tracking-[0.3em] mb-10">"{quote}"</p>
-
-        {/* Join Section */}
-        <div className={`mb-10 p-6 rounded-[2.5rem] ${dark ? 'bg-slate-900/50 border-white/5 shadow-2xl' : 'bg-white border-slate-200 shadow-xl'} border`}>
-          <div className="flex gap-2">
-            <input type="text" placeholder={t.code} className="flex-1 bg-slate-500/5 p-4 rounded-2xl outline-none" value={inputCode} onChange={e => setInputCode(e.target.value)} />
-            <button onClick={() => {
-              if (events.some(e => e.roomCode === inputCode)) {
-                const updated = [...unlockedRooms, inputCode];
-                setUnlockedRooms(updated);
-                localStorage.setItem('unlocked_rooms', JSON.stringify(updated));
-                setInputCode('');
-                confetti({ particleCount: 50 });
-              }
-            }} className="px-6 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px]">Join</button>
-          </div>
+      <main className="max-w-xl mx-auto p-6 pb-24">
+        <div className="flex gap-2 mb-10">
+          <input type="text" placeholder="Room Code" className="flex-1 bg-zinc-500/10 p-5 rounded-2xl outline-none" value={inputCode} onChange={e => setInputCode(e.target.value)} />
+          <button onClick={() => {
+            if(events.some(e => e.roomCode === inputCode)) {
+              setUnlockedRooms([...unlockedRooms, inputCode]);
+              localStorage.setItem('unlocked_rooms', JSON.stringify([...unlockedRooms, inputCode]));
+              setInputCode('');
+            }
+          }} className="px-8 bg-blue-600 text-white rounded-2xl font-black text-[10px] uppercase">Join</button>
         </div>
 
-        <button onClick={() => setShowModal(true)} className={`w-full py-5 rounded-[2.5rem] font-black mb-12 shadow-2xl transition-transform active:scale-95 ${dark ? 'bg-white text-black' : 'bg-slate-900 text-white'}`}>
-          + {t.create.toUpperCase()}
-        </button>
+        <button onClick={() => setShowModal(true)} className="w-full py-6 bg-blue-600 text-white rounded-[2.5rem] font-black text-lg mb-12 shadow-lg shadow-blue-500/20 uppercase tracking-widest">+ Host Event</button>
 
-        {/* Room Cards */}
         <div className="space-y-12">
           {events.filter(ev => unlockedRooms.includes(ev.roomCode)).map(ev => {
-            const paidCount = ev.contributions?.length || 0;
-            const remaining = ev.memberCount - paidCount;
+            const contributions = [...(ev.contributions || [])].sort((a, b) => a.time - b.time);
+            const paid = contributions.length;
+            const isFull = paid >= ev.memberCount;
 
             return (
-              <div key={ev.id} className={`p-8 rounded-[3.5rem] border relative overflow-hidden ${dark ? 'bg-slate-900 border-white/5 shadow-2xl' : 'bg-white border-slate-200 shadow-xl'}`}>
-                
-                {/* Fixed Close Button Layout */}
+              <div key={ev.id} className={`p-8 rounded-[3.5rem] border ${dark ? 'bg-zinc-900/40 border-white/5' : 'bg-slate-50 border-slate-200'}`}>
                 <div className="flex justify-between items-start mb-6">
-                  <div className="flex-1">
-                    <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">{ev.title}</span>
-                    <h2 className="text-5xl font-black mt-1 tracking-tighter">₹{ev.perPerson}</h2>
+                  <div>
+                    <p className="text-[10px] font-black text-blue-500 uppercase mb-1 tracking-widest">{ev.title}</p>
+                    <h2 className="text-5xl font-black tracking-tighter">₹{ev.perPerson}</h2>
                   </div>
-                  
-                  <div className="flex flex-col items-end gap-2">
+                  <div className="flex flex-col items-end gap-2 text-right">
                     {ev.creator === user.name && (
-                      <button onClick={async () => confirm("Close room?") && await deleteDoc(doc(db, "events", ev.id))} className="text-[10px] font-black text-red-500 bg-red-500/10 px-3 py-1 rounded-full uppercase tracking-widest transition-colors">
-                        {t.close}
-                      </button>
+                      <button onClick={async () => confirm("End Room?") && await deleteDoc(doc(db, "events", ev.id))} className="text-[8px] font-black text-red-500/50 hover:text-red-500 uppercase">End Room</button>
                     )}
-                    <div className="text-right">
-                      <p className="text-[8px] opacity-40 font-bold uppercase">Code</p>
-                      <p className="font-black text-blue-500">{ev.roomCode}</p>
-                    </div>
+                    {ev.creator === user.name && isFull && (
+                      <button onClick={() => archiveEvent(ev)} className="text-[8px] font-black text-emerald-500 bg-emerald-500/10 px-3 py-1 rounded-full uppercase border border-emerald-500/10">{t.close}</button>
+                    )}
+                    <button onClick={() => copyToClipboard(ev)} className="text-[9px] font-black text-blue-500 bg-blue-500/10 px-3 py-1 rounded-full border border-blue-500/10 uppercase">Copy Code</button>
+                    <p className="font-black text-blue-500 text-lg leading-none mt-1">#{ev.roomCode}</p>
                   </div>
                 </div>
 
-                {/* Tracker Info */}
-                <div className="flex justify-between items-center mb-6 px-4 py-3 bg-blue-500/5 rounded-2xl border border-blue-500/10">
-                   <p className="text-[10px] font-black uppercase tracking-widest">
-                    🔥 {paidCount} / {ev.memberCount} Paid
-                   </p>
-                   <p className="text-[10px] font-bold opacity-50 uppercase">
-                    {remaining > 0 ? `${remaining} ${t.remaining}` : "All Clear!"}
-                   </p>
+                <div className="mb-8">
+                   <div className="h-1.5 w-full bg-zinc-500/10 rounded-full overflow-hidden">
+                      <div className="h-full bg-blue-500 transition-all duration-1000" style={{ width: `${(paid / ev.memberCount) * 100}%` }}></div>
+                   </div>
+                   <p className="text-[9px] font-black opacity-30 mt-3 uppercase tracking-widest">{paid} / {ev.memberCount} PAID</p>
                 </div>
 
-                {/* QR Section */}
-                <div className="flex flex-col items-center p-8 bg-slate-500/5 rounded-[2.5rem] mb-8 border border-white/5">
-                  <div className="bg-white p-4 rounded-3xl shadow-2xl">
-                     <img src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=upi://pay?pa=${ev.creatorUpi}&pn=${ev.creator}&am=${ev.perPerson}&cu=INR`} className="w-36 h-36" alt="QR" />
-                  </div>
-                  <p className="mt-4 text-[10px] font-black opacity-30 uppercase tracking-tighter text-center">Scan to Pay {ev.creator}</p>
+                <div className="flex flex-col items-center mb-10">
+                   <div className="p-4 rounded-[2.5rem] bg-white shadow-lg">
+                      <img src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=upi://pay?pa=${ev.creatorUpi}&pn=${ev.creator}&am=${ev.perPerson}&cu=INR`} className="w-24 h-24" alt="QR" />
+                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <button onClick={() => window.open(`https://wa.me/?text=Pay ₹${ev.perPerson} for ${ev.title}. Room Code: ${ev.roomCode}`, '_blank')} className="py-4 bg-emerald-500/10 text-emerald-500 rounded-2xl font-black text-[10px] uppercase">{t.remind}</button>
-                  <button 
-                    disabled={remaining <= 0}
-                    onClick={() => handlePaid(ev)} 
-                    className={`py-4 rounded-2xl font-black text-[10px] uppercase shadow-lg transition-opacity ${remaining <= 0 ? 'opacity-30 cursor-not-allowed' : ''} ${dark ? 'bg-white text-black' : 'bg-slate-900 text-white'}`}
-                  >
-                    {remaining <= 0 ? "Full" : "I've Paid"}
+                <div className="grid grid-cols-2 gap-3 mb-8">
+                  <button onClick={() => window.open(`https://wa.me/?text=Pay ₹${ev.perPerson} for ${ev.title}. Code: ${ev.roomCode}`, '_blank')} className="py-4 bg-zinc-500/10 rounded-2xl font-black text-[10px] uppercase">Nudge</button>
+                  <button disabled={isFull} onClick={() => handlePaid(ev)} className={`py-4 rounded-2xl font-black text-[10px] uppercase transition-all ${isFull ? 'bg-emerald-500/10 text-emerald-500' : 'bg-blue-600 text-white'}`}>
+                    {isFull ? "FULLY PAID" : "I'VE PAID"}
                   </button>
                 </div>
 
-                {/* Contribution Feed */}
-                {ev.contributions?.length > 0 && (
-                  <div className="mt-8 pt-6 border-t border-white/5 space-y-3">
-                    {ev.contributions.map((c, i) => (
-                      <div key={i} className="flex justify-between items-center text-[10px] font-bold opacity-60 bg-slate-500/5 p-3 rounded-xl">
-                        <span>✓ {c.name.toUpperCase()}</span>
-                        <span className="italic opacity-40">"{c.note}"</span>
-                      </div>
-                    ))}
+                {/* --- SPEED LEADERBOARD --- */}
+                {paid > 0 && (
+                  <div className="pt-6 border-t border-white/5">
+                    <h4 className="text-[9px] font-black opacity-30 uppercase tracking-[0.2em] mb-4 text-center">{t.leaderboard}</h4>
+                    <div className="space-y-2">
+                      {contributions.map((c, i) => (
+                        <div key={i} className="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/5">
+                          <div className="flex items-center gap-3">
+                            <span className="text-[10px] font-black opacity-40">{i + 1}</span>
+                            <span className="text-[10px] font-black tracking-wide uppercase">
+                              {c.name} {i === 0 && '🥇'} {i === 1 && '🥈'} {i === 2 && '🥉'}
+                            </span>
+                          </div>
+                          <div className="text-right">
+                             <p className="text-[8px] font-black text-blue-500 opacity-60">{formatTime(c.time)}</p>
+                             <p className="text-[9px] italic opacity-30">"{c.note}"</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -202,30 +188,49 @@ export default function App() {
           })}
         </div>
 
-        {/* Footer */}
-        <footer className="mt-24 text-center border-t border-white/5 pt-12 pb-6">
-          <p className={`text-xs font-black uppercase tracking-[0.3em] ${dark ? 'text-blue-500' : 'text-blue-600'}`}>Created by Sarthak Gupta</p>
-          <p className="text-[10px] italic opacity-40 mt-3 leading-relaxed px-12">
-            "A lefty creating productive applications so that you could be lazy"
-          </p>
-        </footer>
+        {/* History Section */}
+        {archive.length > 0 && (
+          <section className="mt-24 border-t border-white/5 pt-12">
+            <h3 className="text-[9px] font-black opacity-30 uppercase tracking-[0.4em] mb-8 px-2">{t.history}</h3>
+            <div className="space-y-4">
+              {archive.map(ev => (
+                <div key={ev.id} className={`p-6 rounded-[2rem] border flex justify-between items-center ${dark ? 'bg-zinc-950/40 border-white/5' : 'bg-slate-100/50 border-slate-200 opacity-60'}`}>
+                  <div><p className="text-[9px] font-black opacity-40 uppercase mb-1">{ev.title}</p><p className="text-xl font-black tracking-tighter">₹{ev.perPerson}</p></div>
+                  <span className="text-[8px] font-black bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full uppercase">Settled</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Profile Card */}
+        <section className="mt-32">
+          <div className={`p-8 rounded-[3rem] border ${dark ? 'bg-zinc-900 border-white/5' : 'bg-slate-100 border-slate-200'}`}>
+            <div className="flex justify-between items-center mb-10">
+              <h4 className="text-xl font-black tracking-tighter uppercase">{user.name}</h4>
+              <button onClick={handleLogout} className="text-[10px] font-black px-6 py-2 bg-red-500/10 text-red-500 rounded-full border border-red-500/10 uppercase">{t.logout}</button>
+            </div>
+            <div className="pt-8 border-t border-white/10">
+              <h4 className="text-lg font-black tracking-tighter uppercase mb-1">Sarthak Gupta</h4>
+              <p className="text-[11px] font-medium italic opacity-40 leading-relaxed max-w-[280px]">A lefty creating productive applications so that you could be lazy</p>
+            </div>
+          </div>
+        </section>
       </main>
 
-      {/* Modal */}
+      {/* Host Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-2xl z-[60] flex items-center justify-center p-6">
-          <div className={`w-full max-w-md p-10 rounded-[4rem] border ${dark ? 'bg-slate-900 border-white/10 shadow-2xl' : 'bg-white border-slate-200'}`}>
-            <h3 className="text-3xl font-black mb-8 text-blue-500 italic tracking-tighter">Plan Activity</h3>
+        <div className={`fixed inset-0 ${dark ? 'bg-black/98' : 'bg-white/98'} z-[60] flex items-center justify-center p-6`}>
+          <div className={`w-full max-w-sm p-10 rounded-[3rem] border ${dark ? 'bg-zinc-900 border-white/10' : 'bg-white border-slate-200'}`}>
+            <h3 className="text-xl font-black mb-8 text-blue-500 italic uppercase">Host Room</h3>
             <div className="space-y-4">
-              <input type="text" placeholder="Activity Name" className="w-full p-5 rounded-2xl bg-slate-500/10 outline-none border border-transparent focus:border-blue-500" onChange={e => setForm({...form, title: e.target.value})} />
-              <div className="flex gap-4">
-                <input type="number" placeholder="Total ₹" className="w-1/2 p-5 rounded-2xl bg-slate-500/10 outline-none border border-transparent focus:border-blue-500" onChange={e => setForm({...form, totalAmount: e.target.value})} />
-                <input type="number" placeholder="Total Friends" className="w-1/2 p-5 rounded-2xl bg-slate-500/10 outline-none border border-transparent focus:border-blue-500" onChange={e => setForm({...form, memberCount: e.target.value})} />
+              <input type="text" placeholder="Activity" className="w-full p-5 rounded-2xl bg-zinc-500/10 outline-none" onChange={e => setForm({...form, title: e.target.value})} />
+              <div className="flex gap-3">
+                <input type="number" placeholder="₹ Total" className="w-1/2 p-5 rounded-2xl bg-zinc-500/10 outline-none" onChange={e => setForm({...form, totalAmount: e.target.value})} />
+                <input type="number" placeholder="People" className="w-1/2 p-5 rounded-2xl bg-zinc-500/10 outline-none" onChange={e => setForm({...form, memberCount: e.target.value})} />
               </div>
-              <div className="flex gap-4 mt-6">
-                <button onClick={() => setShowModal(false)} className="flex-1 text-[10px] font-bold opacity-30 uppercase tracking-widest">Cancel</button>
-                <button onClick={createEvent} className="flex-[2] py-5 bg-blue-600 text-white rounded-[2rem] font-black shadow-lg shadow-blue-500/20">LAUNCH ROOM</button>
-              </div>
+              <button onClick={createEvent} className="w-full py-5 bg-blue-600 text-white rounded-[2rem] font-black mt-4 uppercase tracking-widest shadow-lg shadow-blue-500/20">Launch</button>
+              <button onClick={() => setShowModal(false)} className="w-full text-[10px] font-black opacity-30 uppercase mt-4">Close</button>
             </div>
           </div>
         </div>

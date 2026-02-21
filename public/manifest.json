@@ -4,19 +4,14 @@
   "description": "The easiest way to split bills and track group payments.",
   "icons": [
     {
-      "src": "logo-192.png",
+      "src": "milkar_logo.png",
       "type": "image/png",
-      "sizes": "192x192",
+      "sizes": "512x512",
       "purpose": "any maskable"
-    },
-    {
-      "src": "logo-512.png",
-      "type": "image/png",
-      "sizes": "512x512"
     }
   ],
   "start_url": ".",
   "display": "standalone",
   "theme_color": "#0a0f1e",
-  "background_color": "#0a0f1e"
+  "background_color": "#050505"
 }
