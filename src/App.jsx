@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { db } from './firebase';
-import { collection, addDoc, onSnapshot, updateDoc, doc, deleteDoc, arrayUnion, query, orderBy, setDoc } from 'firebase/firestore';
+import { collection, addDoc, onSnapshot, updateDoc, doc, deleteDoc, arrayUnion, query, orderBy, setDoc, serverTimestamp } from 'firebase/firestore';
 import confetti from 'canvas-confetti';
 
 const translations = {
   en: { logo: 'MILKAR', join: 'Join', create: 'Host', per: 'Each', note: 'Fun note?', close: 'Settle & Archive', logout: 'Logout', history: 'Settled Parties', leaderboard: 'Speed Leaderboard' },
-  hi: { logo: 'मिलकर', join: 'जुड़ें', create: 'होस्ट', per: 'प्रति व्यक्ति', note: 'संदेश', close: 'सेटल करें', logout: 'लॉग आउट', history: 'पुराने हिसाब', leaderboard: 'सबसे तेज़' },
-  hr: { logo: 'मिलकर', join: 'आजा', create: 'जोड़', per: 'एक के', note: 'मजाक', close: 'मेट दयो', logout: 'बाहर', history: 'पुराने', leaderboard: 'सबसे पहले' }
+  hi: { logo: 'मिलकर', join: 'जुड़ें', create: 'होस्ट', per: 'प्रति व्यक्ति', note: 'संदेश', close: 'सेटल करें', logout: 'लॉग आउट', history: 'पुराने हिसाब', leaderboard: 'सबसे तेज़' },
+  hr: { logo: 'मिलकर', join: 'आजा', create: 'जोड़', per: 'एक के', note: 'मजाक', close: 'मेट दयो', logout: 'बाहर', history: 'पुराने', leaderboard: 'सबसे पहले' }
 };
 
 export default function App() {
@@ -43,6 +43,30 @@ export default function App() {
 
   const handleLogout = () => {
     if(confirm("Logout?")) { localStorage.removeItem('milkar_user'); setUser(null); }
+  };
+
+  const createEvent = async () => {
+    if (!form.title || !form.totalAmount || !form.memberCount) return alert("Fill all fields");
+    const perPerson = (parseFloat(form.totalAmount) / parseInt(form.memberCount)).toFixed(2);
+    const roomCode = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    await addDoc(collection(db, "events"), {
+      ...form,
+      perPerson,
+      roomCode,
+      creator: user.name,
+      creatorUpi: user.upi,
+      contributions: [],
+      createdAt: serverTimestamp()
+    });
+
+    setUnlockedRooms(prev => {
+      const updated = [...prev, roomCode];
+      localStorage.setItem('unlocked_rooms', JSON.stringify(updated));
+      return updated;
+    });
+    
+    setShowModal(false);
   };
 
   const copyToClipboard = (ev) => {
@@ -107,8 +131,9 @@ export default function App() {
           <input type="text" placeholder="Room Code" className="flex-1 bg-zinc-500/10 p-5 rounded-2xl outline-none" value={inputCode} onChange={e => setInputCode(e.target.value)} />
           <button onClick={() => {
             if(events.some(e => e.roomCode === inputCode)) {
-              setUnlockedRooms([...unlockedRooms, inputCode]);
-              localStorage.setItem('unlocked_rooms', JSON.stringify([...unlockedRooms, inputCode]));
+              const updated = [...unlockedRooms, inputCode];
+              setUnlockedRooms(updated);
+              localStorage.setItem('unlocked_rooms', JSON.stringify(updated));
               setInputCode('');
             }
           }} className="px-8 bg-blue-600 text-white rounded-2xl font-black text-[10px] uppercase">Join</button>
@@ -142,16 +167,16 @@ export default function App() {
                 </div>
 
                 <div className="mb-8">
-                   <div className="h-1.5 w-full bg-zinc-500/10 rounded-full overflow-hidden">
-                      <div className="h-full bg-blue-500 transition-all duration-1000" style={{ width: `${(paid / ev.memberCount) * 100}%` }}></div>
-                   </div>
-                   <p className="text-[9px] font-black opacity-30 mt-3 uppercase tracking-widest">{paid} / {ev.memberCount} PAID</p>
+                    <div className="h-1.5 w-full bg-zinc-500/10 rounded-full overflow-hidden">
+                       <div className="h-full bg-blue-500 transition-all duration-1000" style={{ width: `${(paid / ev.memberCount) * 100}%` }}></div>
+                    </div>
+                    <p className="text-[9px] font-black opacity-30 mt-3 uppercase tracking-widest">{paid} / {ev.memberCount} PAID</p>
                 </div>
 
                 <div className="flex flex-col items-center mb-10">
-                   <div className="p-4 rounded-[2.5rem] bg-white shadow-lg">
-                      <img src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=upi://pay?pa=${ev.creatorUpi}&pn=${ev.creator}&am=${ev.perPerson}&cu=INR`} className="w-24 h-24" alt="QR" />
-                   </div>
+                    <div className="p-4 rounded-[2.5rem] bg-white shadow-lg">
+                       <img src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=upi://pay?pa=${ev.creatorUpi}&pn=${ev.creator}&am=${ev.perPerson}&cu=INR`} className="w-24 h-24" alt="QR" />
+                    </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 mb-8">
@@ -161,7 +186,6 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* --- SPEED LEADERBOARD --- */}
                 {paid > 0 && (
                   <div className="pt-6 border-t border-white/5">
                     <h4 className="text-[9px] font-black opacity-30 uppercase tracking-[0.2em] mb-4 text-center">{t.leaderboard}</h4>
@@ -175,8 +199,8 @@ export default function App() {
                             </span>
                           </div>
                           <div className="text-right">
-                             <p className="text-[8px] font-black text-blue-500 opacity-60">{formatTime(c.time)}</p>
-                             <p className="text-[9px] italic opacity-30">"{c.note}"</p>
+                              <p className="text-[8px] font-black text-blue-500 opacity-60">{formatTime(c.time)}</p>
+                              <p className="text-[9px] italic opacity-30">"{c.note}"</p>
                           </div>
                         </div>
                       ))}
@@ -188,7 +212,6 @@ export default function App() {
           })}
         </div>
 
-        {/* History Section */}
         {archive.length > 0 && (
           <section className="mt-24 border-t border-white/5 pt-12">
             <h3 className="text-[9px] font-black opacity-30 uppercase tracking-[0.4em] mb-8 px-2">{t.history}</h3>
@@ -203,9 +226,8 @@ export default function App() {
           </section>
         )}
 
-        {/* Profile Card */}
         <section className="mt-32">
-          <div className={`p-8 rounded-[3rem] border ${dark ? 'bg-zinc-900 border-white/5' : 'bg-slate-100 border-slate-200'}`}>
+          <div className={`p-8 rounded-[3rem] border ${dark ? 'bg-zinc-900 border-white/5 shadow-2xl' : 'bg-slate-100 border-slate-200'}`}>
             <div className="flex justify-between items-center mb-10">
               <h4 className="text-xl font-black tracking-tighter uppercase">{user.name}</h4>
               <button onClick={handleLogout} className="text-[10px] font-black px-6 py-2 bg-red-500/10 text-red-500 rounded-full border border-red-500/10 uppercase">{t.logout}</button>
@@ -218,7 +240,6 @@ export default function App() {
         </section>
       </main>
 
-      {/* Host Modal */}
       {showModal && (
         <div className={`fixed inset-0 ${dark ? 'bg-black/98' : 'bg-white/98'} z-[60] flex items-center justify-center p-6`}>
           <div className={`w-full max-w-sm p-10 rounded-[3rem] border ${dark ? 'bg-zinc-900 border-white/10' : 'bg-white border-slate-200'}`}>
