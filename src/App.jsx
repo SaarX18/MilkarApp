@@ -18,7 +18,7 @@ const translations = {
     nudge: 'Send Reminder'
   },
   hi: { 
-    logo: 'मिलकर', join: 'जुड़ें', create: 'नया कलेक्शन', per: 'प्रति व्यक्ति', note: 'संदेश/नाम (वैकल्पिक)', 
+    logo: 'मिलकर', join: 'जुड़ें', create: 'नया कलेक्शन', per: 'प्रति व्यक्ति', note: 'संदेश/नाम (वैकल्पिक)', 
     close: 'हिसाब बंद करें', logout: 'लॉग आउट', history: 'पुराने हिसाब', leaderboard: 'पेमेंट लिस्ट', 
     summary: 'व्हाट्सएप समरी', payNow: 'UPI से पे करें', edit: 'बदलें', verify: 'पुष्टि करें',
     loginTitle: 'स्वागत है', loginSub: 'सबके लिए, हर जगह, सही और साफ हिसाब।',
@@ -26,7 +26,7 @@ const translations = {
     activity: 'किस लिए है?', total: 'कुल राशि', people: 'कुल लोग',
     upiLabel: 'UPI ID लिखें', upiNote: 'पैसे सीधे आपके बैंक में आएंगे।',
     launch: 'शुरू करें', cancel: 'वापस', end: 'हटाएं', roomCode: 'कोड',
-    copy: 'कोड कॉपी हुआ!', joinBtn: 'जुड़ें', pending: 'पुष्टि का इंतज़ार है', 
+    copy: 'कोड कॉपी हुआ!', joinBtn: 'जुड़ें', pending: 'पुष्टि का इंतज़ार है', 
     quote: 'ग्रुप का हिसाब अब आसान। मिलकर चुनें।',
     nudge: 'याद दिलाएं'
   }
@@ -113,6 +113,11 @@ export default function App() {
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
   };
 
+  const sendNudge = (ev) => {
+    const text = `*Reminder from Milkar* 🔔\n\nRegarding: *${ev.title}*\nPlease complete your contribution of *₹${ev.perPerson}*.\nUse Code: *${ev.roomCode}* at [YourLinkHere]`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+  };
+
   if (loading) return <div className="min-h-screen bg-black flex items-center justify-center text-blue-500 font-black italic text-4xl tracking-tighter animate-pulse">MILKAR</div>;
 
   if (!user) {
@@ -170,7 +175,12 @@ export default function App() {
                   </div>
                   <div className="flex flex-col items-end gap-2">
                     <button onClick={() => { navigator.clipboard.writeText(ev.roomCode); alert(t.copy); }} className={`text-[9px] font-black text-blue-500 bg-blue-500/10 px-3 py-1 rounded-full uppercase`}>#{ev.roomCode}</button>
-                    {ev.creatorId === user.id && <button onClick={() => shareSummary(ev)} className="text-[8px] font-black text-emerald-500 bg-emerald-500/10 px-3 py-2 rounded-full uppercase">📱 {t.summary}</button>}
+                    {ev.creatorId === user.id && (
+                      <div className="flex gap-2">
+                        <button onClick={() => sendNudge(ev)} className="text-[8px] font-black text-orange-500 bg-orange-500/10 px-3 py-2 rounded-full uppercase">{t.nudge}</button>
+                        <button onClick={() => shareSummary(ev)} className="text-[8px] font-black text-emerald-500 bg-emerald-500/10 px-3 py-2 rounded-full uppercase">{t.summary}</button>
+                      </div>
+                    )}
                   </div>
                 </div>
 
