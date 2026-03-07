@@ -17,6 +17,16 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     
     <script src="https://cdn.tailwindcss.com"></script>
+
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then(reg => console.log('Milkar PWA Ready'))
+            .catch(err => console.log('PWA Setup Failed', err));
+        });
+      }
+    </script>
   </head>
   <body class="bg-[#050505]">
     <div id="root"></div>
