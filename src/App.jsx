@@ -9,25 +9,27 @@ const translations = {
     history: 'Activity History', payNow: 'Pay via UPI', verify: 'Verify Payment',
     loginSub: 'Fair splitting for everyone, everywhere.', 
     enterName: 'Enter your Name', loginBtn: 'Enter App',
-    activity: 'What is this for?', total: 'Total Amount', people: 'Total People', 
+    activity: 'What is this for?', total: 'Total Budget (₹)', people: 'Total People', 
+    fixedAmt: 'Fixed Amount (₹)', modeFixed: 'Fixed Collection', modeSplit: 'Split Budget',
     upiLabel: 'UPI ID', launch: 'Create Room', end: 'Delete Event', roomCode: 'Room Code',
     copy: 'Code Copied!', joinBtn: 'Join', about: 'How it Works', 
     typeOneTime: 'One-Time Split', typeSub: 'Prepaid Wallet', deduct: 'Deduct Fee',
     edit: 'Edit Event', save: 'Save Changes', alreadyPaid: 'Already notified the host!',
-    eventFull: 'This event is 100% funded!', collected: 'Collected'
+    eventFull: 'This event is 100% funded!', collected: 'Collected', credit: 'Credit'
   },
   hi: { 
     logo: 'मिलकर', join: 'जुड़ें', create: 'नया कलेक्शन', per: 'प्रति व्यक्ति', 
     history: 'पुराने हिसाब', payNow: 'UPI से पे करें', verify: 'पुष्टि करें',
     loginSub: 'सबके लिए, हर जगह, सही और साफ हिसाब।',
     enterName: 'अपना नाम लिखें', loginBtn: 'ऐप खोलें',
-    activity: 'किस लिए है?', total: 'कुल राशि', people: 'कुल लोग',
+    activity: 'किस लिए है?', total: 'कुल बजट (₹)', people: 'कुल लोग',
+    fixedAmt: 'तय राशि (₹)', modeFixed: 'फिक्स्ड कलेक्शन', modeSplit: 'बजट बांटें',
     upiLabel: 'UPI ID लिखें', launch: 'शुरू करें', 
     end: 'हटाएं', roomCode: 'कोड', copy: 'कोड कॉपी हुआ!', 
     joinBtn: 'जुड़ें', about: 'यह कैसे काम करता है', typeOneTime: 'एक बार का हिसाब', 
     typeSub: 'प्रीपेड वॉलेट', deduct: 'फीस काटें',
     edit: 'बदलाव करें', save: 'सुरक्षित करें', alreadyPaid: 'सूचना दे दी गई है!',
-    eventFull: 'हिसाब पूरा हो चुका है!', collected: 'जमा हुआ'
+    eventFull: 'हिसाब पूरा हो चुका है!', collected: 'जमा हुआ', credit: 'वापसी'
   }
 };
 
@@ -41,7 +43,8 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [isEditing, setIsEditing] = useState(null);
-  const [form, setForm] = useState({ title: '', totalAmount: '', memberCount: '', upi: '', type: 'one-time' });
+  const [isFixedMode, setIsFixedMode] = useState(false);
+  const [form, setForm] = useState({ title: '', totalAmount: '', fixedAmount: '', memberCount: '', upi: '', type: 'one-time' });
   const [inputCode, setInputCode] = useState('');
   const [unlockedRooms, setUnlockedRooms] = useState([]);
   const [hasClickedPay, setHasClickedPay] = useState({});
@@ -68,10 +71,10 @@ export default function App() {
       
       const ninetyDaysAgo = Date.now() - (90 * 24 * 60 * 60 * 1000);
       setHistory(allEvents.filter(ev => {
+          const timestamp = ev.createdAt?.toMillis?.() || (ev.createdAt?.seconds ? ev.createdAt.seconds * 1000 : Date.now());
           const isCreator = ev.creatorId === user.id;
           const isParticipant = ev.contributions?.some(c => c.userId === user.id);
-          const isRecent = ev.createdAt?.toMillis() > ninetyDaysAgo;
-          return (isCreator || isParticipant) && isRecent;
+          return (isCreator || isParticipant) && timestamp > ninetyDaysAgo;
       }));
     });
     return () => unsubscribe();
@@ -85,16 +88,26 @@ export default function App() {
   };
 
   const saveRoom = async () => {
-    if (!form.title || !form.totalAmount) return alert("Fill details");
-    const perPerson = (parseFloat(form.totalAmount) / (parseInt(form.memberCount) || 1)).toFixed(2);
+    if (!form.title || (!form.totalAmount && !form.fixedAmount)) return alert("Fill details");
     
+    let perPerson, totalAmount;
+    if (isFixedMode) {
+        perPerson = parseFloat(form.fixedAmount).toFixed(2);
+        totalAmount = (parseFloat(form.fixedAmount) * parseInt(form.memberCount)).toFixed(2);
+    } else {
+        totalAmount = parseFloat(form.totalAmount).toFixed(2);
+        perPerson = (totalAmount / (parseInt(form.memberCount) || 1)).toFixed(2);
+    }
+    
+    const payload = { ...form, totalAmount, perPerson, isFixedMode };
+
     if (isEditing) {
-      await updateDoc(doc(db, "events", isEditing), { ...form, perPerson });
+      await updateDoc(doc(db, "events", isEditing), payload);
       setIsEditing(null);
     } else {
       const roomCode = Math.floor(100000 + Math.random() * 900000).toString();
       await addDoc(collection(db, "events"), { 
-        ...form, perPerson, roomCode, creator: user.name, creatorUpi: form.upi, creatorId: user.id, 
+        ...payload, roomCode, creator: user.name, creatorUpi: form.upi, creatorId: user.id, 
         contributions: [], createdAt: serverTimestamp() 
       });
       const updatedCodes = [...unlockedRooms, roomCode];
@@ -102,16 +115,10 @@ export default function App() {
       localStorage.setItem('unlocked_rooms', JSON.stringify(updatedCodes));
     }
     setShowModal(false);
-    setForm({ title: '', totalAmount: '', memberCount: '', upi: '', type: 'one-time' });
+    setForm({ title: '', totalAmount: '', fixedAmount: '', memberCount: '', upi: '', type: 'one-time' });
   };
 
   const handlePaymentNotification = async (ev) => {
-    const isAlreadyNotified = ev.contributions?.some(c => c.userId === user.id && !c.verified);
-    if (isAlreadyNotified && ev.type === 'one-time') return alert(t.alreadyPaid);
-
-    const verifiedTotal = ev.contributions?.filter(c => c.verified).reduce((sum, c) => sum + parseFloat(c.amountPaid), 0) || 0;
-    if (ev.type === 'one-time' && verifiedTotal >= parseFloat(ev.totalAmount)) return alert(t.eventFull);
-
     const amt = ev.type === 'subscription' ? prompt("Recharge Amount? (₹)") : ev.perPerson;
     if (!amt) return;
 
@@ -131,7 +138,7 @@ export default function App() {
 
   if (!user) return (
     <div className={`min-h-screen ${dark ? 'bg-black text-white' : 'bg-slate-50 text-black'} flex items-center justify-center p-6`}>
-      <div className={`w-full max-sm p-10 rounded-[3rem] ${dark ? 'bg-zinc-900 border-white/5' : 'bg-white shadow-2xl'} border text-center`}>
+      <div className={`w-full max-w-sm p-10 rounded-[3rem] ${dark ? 'bg-zinc-900 border-white/5' : 'bg-white shadow-2xl'} border text-center`}>
         <h1 className="text-5xl font-black text-blue-500 italic mb-2 tracking-tighter uppercase">{t.logo}</h1>
         <p className="text-[11px] opacity-60 mb-8">{t.loginSub}</p>
         <input type="text" placeholder={t.enterName} className={`w-full p-5 mb-8 rounded-2xl outline-none ${dark ? 'bg-white/10' : 'bg-slate-100'}`} onChange={e => setTempName(e.target.value)} />
@@ -176,12 +183,18 @@ export default function App() {
         <main className="max-w-xl mx-auto p-6">
           <h2 className="text-3xl font-black mb-8 uppercase text-blue-500">{t.history}</h2>
           <div className="space-y-4">
-            {history.map(ev => (
-              <div key={ev.id} className={`p-6 rounded-3xl border ${dark ? 'bg-zinc-900 border-white/5' : 'bg-slate-50 border-slate-200'}`}>
-                <div className="flex justify-between items-center"><span className="font-black uppercase text-[11px]">{ev.title}</span><span className="text-blue-500 font-black">₹{ev.perPerson}</span></div>
-                <p className="text-[9px] opacity-40 mt-1 uppercase">{ev.createdAt?.toDate().toDateString()}</p>
-              </div>
-            ))}
+            {history.map(ev => {
+              const displayDate = ev.createdAt?.toDate?.() ? ev.createdAt.toDate().toDateString() : 'Just now';
+              return (
+                <div key={ev.id} className={`p-6 rounded-3xl border ${dark ? 'bg-zinc-900 border-white/5' : 'bg-slate-50 border-slate-200'}`}>
+                  <div className="flex justify-between items-center">
+                    <span className="font-black uppercase text-[11px]">{ev.title}</span>
+                    <span className="text-blue-500 font-black">₹{ev.perPerson}</span>
+                  </div>
+                  <p className="text-[9px] opacity-40 mt-1 uppercase">{displayDate}</p>
+                </div>
+              )
+            })}
             {history.length === 0 && <p className="text-center opacity-30 py-20 font-black uppercase text-[10px]">No recent activity</p>}
           </div>
           <button onClick={() => setView('app')} className="w-full mt-10 py-4 bg-zinc-800 rounded-2xl font-black text-[10px] uppercase">Back</button>
@@ -215,7 +228,7 @@ export default function App() {
                       <div className="flex items-center gap-2">
                          <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest">{ev.title}</p>
                          {ev.creatorId === user.id && (
-                           <button onClick={() => { setForm(ev); setIsEditing(ev.id); setShowModal(true); }} className="text-[10px] opacity-30">✏️</button>
+                           <button onClick={() => { setForm(ev); setIsEditing(ev.id); setIsFixedMode(ev.isFixedMode); setShowModal(true); }} className="text-[10px] opacity-30">✏️</button>
                          )}
                       </div>
                       <h2 className="text-5xl font-black tracking-tighter">₹{ev.perPerson}</h2>
@@ -226,7 +239,7 @@ export default function App() {
                   {!isSub && (
                     <div className="mb-8">
                       <div className="flex justify-between text-[9px] font-black uppercase mb-2 opacity-60">
-                        <span>{t.collected}: ₹{verifiedTotal}</span>
+                        <span>{t.collected}: ₹{verifiedTotal.toFixed(2)}</span>
                         <span>{Math.round(progress)}%</span>
                       </div>
                       <div className="w-full h-3 bg-zinc-800 rounded-full overflow-hidden">
@@ -246,24 +259,33 @@ export default function App() {
                   </div>
 
                   <div className="space-y-2">
-                    {ev.contributions?.map((c, i) => (
-                      <div key={i} className={`flex justify-between items-center p-4 rounded-2xl ${c.verified ? 'bg-emerald-500/5' : 'bg-orange-500/5'}`}>
-                        <div className="flex flex-col">
-                          <span className="text-[10px] font-black uppercase">{c.name} {c.verified ? '✅' : '⏳'}</span>
-                          {isSub && <span className="text-[9px] font-bold text-blue-500">Wallet: ₹{c.balance}</span>}
-                        </div>
-                        {ev.creatorId === user.id && (
-                          <div className="flex gap-2">
-                            {!c.verified && <button onClick={async () => {
-                              const up = ev.contributions.map((item, idx) => idx === i ? {...item, verified: true} : item);
-                              await updateDoc(doc(db, "events", ev.id), { contributions: up });
-                              confetti({ particleCount: 50 });
-                            }} className="bg-emerald-600 text-white text-[8px] font-black px-4 py-2 rounded-full uppercase">{t.verify}</button>}
-                            {isSub && c.verified && <button onClick={() => handleDeduction(ev, c)} className="bg-blue-600 text-white text-[8px] font-black px-4 py-2 rounded-full uppercase">{t.deduct}</button>}
+                    {ev.contributions?.map((c, i) => {
+                      const overpaid = c.amountPaid > parseFloat(ev.perPerson);
+                      const creditAmt = (c.amountPaid - parseFloat(ev.perPerson)).toFixed(2);
+
+                      return (
+                        <div key={i} className={`flex justify-between items-center p-4 rounded-2xl ${c.verified ? 'bg-emerald-500/5' : 'bg-orange-500/5'}`}>
+                          <div className="flex flex-col">
+                            <span className="text-[10px] font-black uppercase">{c.name} {c.verified ? '✅' : '⏳'}</span>
+                            {isSub ? (
+                                <span className="text-[9px] font-bold text-blue-500">Wallet: ₹{c.balance}</span>
+                            ) : (
+                                c.verified && overpaid && <span className="text-[8px] font-bold text-emerald-500 italic">{t.credit}: ₹{creditAmt}</span>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    ))}
+                          {ev.creatorId === user.id && (
+                            <div className="flex gap-2">
+                              {!c.verified && <button onClick={async () => {
+                                const up = ev.contributions.map((item, idx) => idx === i ? {...item, verified: true} : item);
+                                await updateDoc(doc(db, "events", ev.id), { contributions: up });
+                                confetti({ particleCount: 50 });
+                              }} className="bg-emerald-600 text-white text-[8px] font-black px-4 py-2 rounded-full uppercase">{t.verify}</button>}
+                              {isSub && c.verified && <button onClick={() => handleDeduction(ev, c)} className="bg-blue-600 text-white text-[8px] font-black px-4 py-2 rounded-full uppercase">{t.deduct}</button>}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
 
                   {ev.creatorId === user.id && (
@@ -278,13 +300,13 @@ export default function App() {
             <div className="flex justify-between items-center mb-8">
               <h4 className="text-xl font-black uppercase">{user.name}</h4>
               <div className="flex gap-2">
-                <button onClick={() => setView('history')} className="text-[10px] font-black px-5 py-2 bg-blue-500/10 text-blue-500 rounded-full">History</button>
-                <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="text-[10px] font-black px-5 py-2 bg-red-500/10 text-red-500 rounded-full">Logout</button>
+                <button onClick={() => setView('history')} className="text-[10px] font-black px-5 py-2 bg-blue-500/10 text-blue-500 rounded-full tracking-widest uppercase">History</button>
+                <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="text-[10px] font-black px-5 py-2 bg-red-500/10 text-red-500 rounded-full tracking-widest uppercase">Logout</button>
               </div>
             </div>
             <footer className="pt-8 border-t border-white/5">
-                <h4 className="text-lg font-black uppercase mb-1">Sarthak Gupta</h4>
-                <p className="text-[11px] font-medium italic">A lefty creating productive apps so that you could be lazy</p>
+                <h4 className="text-lg font-black uppercase mb-1 tracking-tighter">Sarthak Gupta</h4>
+                <p className="text-[11px] font-medium italic opacity-40">A lefty creating productive apps so that you could be lazy</p>
             </footer>
           </section>
         </main>
@@ -293,19 +315,26 @@ export default function App() {
       {showModal && (
         <div className="fixed inset-0 bg-black/95 z-[100] flex items-center justify-center p-6 backdrop-blur-xl">
           <div className={`w-full max-w-sm p-10 rounded-[3rem] border ${dark ? 'bg-zinc-900 border-white/10' : 'bg-white'}`}>
-            <div className="flex gap-2 mb-6">
+            <div className="flex gap-2 mb-4">
               <button onClick={() => setForm({...form, type: 'one-time'})} className={`flex-1 py-3 rounded-xl text-[9px] font-black uppercase ${form.type === 'one-time' ? 'bg-blue-600 text-white' : 'opacity-40'}`}>{t.typeOneTime}</button>
               <button onClick={() => setForm({...form, type: 'subscription'})} className={`flex-1 py-3 rounded-xl text-[9px] font-black uppercase ${form.type === 'subscription' ? 'bg-blue-600 text-white' : 'opacity-40'}`}>{t.typeSub}</button>
             </div>
+            
+            <div className="flex gap-2 mb-6 p-1 bg-black/20 rounded-xl">
+               <button onClick={() => setIsFixedMode(false)} className={`flex-1 py-2 rounded-lg text-[8px] font-black uppercase ${!isFixedMode ? 'bg-zinc-700 text-white' : 'opacity-40'}`}>{t.modeSplit}</button>
+               <button onClick={() => setIsFixedMode(true)} className={`flex-1 py-2 rounded-lg text-[8px] font-black uppercase ${isFixedMode ? 'bg-zinc-700 text-white' : 'opacity-40'}`}>{t.modeFixed}</button>
+            </div>
+
             <div className="flex gap-2 mb-6 overflow-x-auto pb-2 no-scrollbar">
               {templates.map(temp => (
                 <button key={temp.name} onClick={() => setForm({...form, title: temp.name, type: temp.type})} className={`whitespace-nowrap px-4 py-2 rounded-xl text-[10px] font-bold border ${dark ? 'bg-zinc-800' : 'bg-slate-50'}`}>{temp.icon} {temp.name}</button>
               ))}
             </div>
+            
             <div className="space-y-4">
               <input type="text" placeholder={t.activity} value={form.title} className={`w-full p-5 rounded-2xl outline-none ${dark ? 'bg-white/10' : 'bg-slate-100'}`} onChange={e => setForm({...form, title: e.target.value})} />
               <div className="flex gap-2">
-                <input type="number" placeholder={t.total} value={form.totalAmount} className={`w-1/2 p-5 rounded-2xl outline-none ${dark ? 'bg-white/10' : 'bg-slate-100'}`} onChange={e => setForm({...form, totalAmount: e.target.value})} />
+                <input type="number" placeholder={isFixedMode ? t.fixedAmt : t.total} value={isFixedMode ? form.fixedAmount : form.totalAmount} className={`w-1/2 p-5 rounded-2xl outline-none ${dark ? 'bg-white/10' : 'bg-slate-100'}`} onChange={e => setForm({...form, [isFixedMode ? 'fixedAmount' : 'totalAmount']: e.target.value})} />
                 <input type="number" placeholder={t.people} value={form.memberCount} className={`w-1/2 p-5 rounded-2xl outline-none ${dark ? 'bg-white/10' : 'bg-slate-100'}`} onChange={e => setForm({...form, memberCount: e.target.value})} />
               </div>
               <input type="text" placeholder={t.upiLabel} value={form.upi} className={`w-full p-5 rounded-2xl outline-none ${dark ? 'bg-white/10' : 'bg-slate-100'}`} onChange={e => setForm({...form, upi: e.target.value})} />
